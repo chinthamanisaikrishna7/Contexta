@@ -264,7 +264,7 @@ export default function App() {
 
       {/* ── Top Navigation ─────────────────────────────────────────── */}
       <nav className="top-nav">
-        <span className="brand">AjourBox</span>
+        <span className="brand">contextaBox</span>
 
         <div className="nav-tabs">
           <button className="nav-tab">

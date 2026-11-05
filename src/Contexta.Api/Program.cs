@@ -17,19 +17,19 @@ builder.Services.AddSingleton<SearchService>();
 
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("AjourFrontend", policy =>
+    options.AddPolicy("contextaFrontend", policy =>
         policy.WithOrigins(
                   "http://localhost:5173",
                   "https://localhost:5001",
                   "https://localhost:5002",
-                  "https://develop.ajoursystem.tech")
+                  "https://develop.contextasystem.tech")
               .AllowAnyHeader()
               .AllowAnyMethod());
 });
 
 var app = builder.Build();
 
-app.UseCors("AjourFrontend");
+app.UseCors("contextaFrontend");
 app.UseAuthorization();
 app.MapControllers();
 
