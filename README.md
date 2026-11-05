@@ -54,12 +54,12 @@ docker compose exec -T postgres psql -U postgres -d contexta -c "SELECT COUNT(*)
 
 ### 2. Point the worker at your document source
 
-By default the worker reads straight from the AjourBox storage path configured in
+By default the worker reads straight from the contextaBox storage path configured in
 `IndexingFolder` (see Configuration below) — no manual file transfer is needed. All
 existing documents in that folder are picked up automatically the first time the worker
 runs.
 
-For local demo/dev without a live AjourBox mount, you can instead point `IndexingFolder`
+For local demo/dev without a live contextaBox mount, you can instead point `IndexingFolder`
 at `data/sample-files/` (bundled PDFs/DOCX). Files whose filenames don't hint at their
 content work best for demonstrating semantic advantage (e.g. `Report_Final_v3.pdf`
 containing "risk mitigation").
@@ -161,4 +161,4 @@ All settings in `appsettings.json` in each project:
 |---|---|---|
 | `ConnectionStrings:Postgres` | `Host=localhost;Port=5432;...` | pgvector connection |
 | `OllamaBaseUrl` | `http://localhost:11434` | Ollama REST API |
-| `IndexingFolder` | `C:\ajourweb-development\ajourbox\files` | AjourBox storage folder to bulk-index. The worker reads files directly from this path — set it to `data/sample-files` for local demo/dev without a live AjourBox mount. |
+| `IndexingFolder` | `C:\contextaweb-development\contextabox\files` | contextaBox storage folder to bulk-index. The worker reads files directly from this path — set it to `data/sample-files` for local demo/dev without a live contextaBox mount. |
