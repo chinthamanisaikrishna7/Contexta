@@ -1,0 +1,6 @@
+@Contexta.Api_HostAddress = http://localhost:5008
+
+GET {{Contexta.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
