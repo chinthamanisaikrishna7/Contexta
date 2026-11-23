@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useEffect, useState } from 'react';
 
 export interface SearchResult {
   id: string;
@@ -10,56 +10,40 @@ export interface SearchResult {
   score: number;
 }
 
-export interface UseSearchResult {
-  query: string;
-  setQuery: (q: string) => void;
+type ResponseState = {
+  request: SearchRequest;
   results: SearchResult[];
-  loading: boolean;
-  error: string | null;
-  searched: boolean;
-}
+  status: 'ready' | 'error';
+};
+type SearchRequest = { query: string; delay: number };
 
-const DEBOUNCE_MS = 400;
-const API_BASE = '/api/search';
-
-export function useSearch(): UseSearchResult {
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState<SearchResult[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [searched, setSearched] = useState(false);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+export function useSearch() {
+  const [request, setRequest] = useState<SearchRequest>({ query: '', delay: 0 });
+  const [response, setResponse] = useState<ResponseState | null>(null);
+  const term = request.query.trim();
 
   useEffect(() => {
-    if (timerRef.current) clearTimeout(timerRef.current);
-
-    if (!query.trim()) {
-      setResults([]);
-      setSearched(false);
-      return;
-    }
-
-    timerRef.current = setTimeout(async () => {
-      setLoading(true);
-      setError(null);
+    if (!term) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
       try {
-        const res = await fetch(`${API_BASE}?query=${encodeURIComponent(query)}&top=10`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data: SearchResult[] = await res.json();
-        setResults(data);
-        setSearched(true);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Search failed');
-        setResults([]);
-      } finally {
-        setLoading(false);
+        const params = new URLSearchParams({ query: term, top: '10' });
+        const res = await fetch(`/api/search?${params}`, { signal: controller.signal });
+        if (!res.ok) throw new Error('Search failed');
+        const results: SearchResult[] = await res.json();
+        if (!controller.signal.aborted) setResponse({ request, results, status: 'ready' });
+      } catch {
+        if (!controller.signal.aborted) setResponse({ request, results: [], status: 'error' });
       }
-    }, DEBOUNCE_MS);
+    }, request.delay);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [request, term]);
 
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-    };
-  }, [query]);
-
-  return { query, setQuery, results, loading, error, searched };
+  const current = response?.request === request ? response : null;
+  return {
+    query: request.query,
+    search: (query: string, immediate = false) => setRequest({ query, delay: immediate ? 0 : 400 }),
+    status: !term ? 'idle' as const : current?.status ?? 'loading' as const,
+    results: current?.results ?? [],
+  };
 }

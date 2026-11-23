@@ -1,502 +1,171 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import Search from '@mui/icons-material/Search';
+import History from '@mui/icons-material/HistoryOutlined';
+import Shield from '@mui/icons-material/GppGoodOutlined';
+import Help from '@mui/icons-material/HelpOutlineOutlined';
+import Grid from '@mui/icons-material/GridViewOutlined';
+import Chevron from '@mui/icons-material/ChevronRight';
+import Arrow from '@mui/icons-material/ArrowForward';
+import Outward from '@mui/icons-material/ArrowOutward';
+import Layers from '@mui/icons-material/LayersOutlined';
+import Plans from '@mui/icons-material/AccountTreeOutlined';
+import Invoice from '@mui/icons-material/ReceiptLongOutlined';
+import People from '@mui/icons-material/GroupsOutlined';
+import Close from '@mui/icons-material/Close';
+import Folder from '@mui/icons-material/FolderOpenOutlined';
+import Warning from '@mui/icons-material/ErrorOutlineOutlined';
+import { Terrain } from './Terrain';
+import { DocumentList, FilePreview, Modal } from './Documents';
 import { useSearch } from './hooks/use-search';
 import type { SearchResult } from './hooks/use-search';
-import SearchIcon from '@mui/icons-material/Search';
-import FolderIcon from '@mui/icons-material/Folder';
-import FolderOpenIcon from '@mui/icons-material/FolderOpen';
-import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
-import CloudUploadIcon from '@mui/icons-material/CloudUpload';
-import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
-import UnfoldMoreIcon from '@mui/icons-material/UnfoldMore';
-import CloseIcon from '@mui/icons-material/Close';
-import DownloadIcon from '@mui/icons-material/Download';
-import CircularProgress from '@mui/material/CircularProgress';
 import './App.css';
 
-// ── Types ────────────────────────────────────────────────────────────────────
+const suggestions = [
+  { title: 'Project risk mitigation', category: 'Project planning', icon: Plans, color: 'sage' },
+  { title: 'Quarterly invoices', category: 'Finance', icon: Invoice, color: 'sand' },
+  { title: 'Employee compensation', category: 'People & policy', icon: People, color: 'lilac' },
+];
 
-interface FolderNode {
-  name: string;
-  path: string;
-  children: FolderNode[];
-  fileCount: number;
+function Suggestions({ onPick }: { onPick: (term: string) => void }) {
+  return <section className="section" aria-labelledby="suggested-title">
+    <div className="section-head"><div><h2 id="suggested-title">Suggested searches</h2>
+      <p>Pick a topic to explore your documents.</p></div></div>
+    <div className="suggestions">{suggestions.map(({ title, category, icon: Icon, color }) =>
+      <button key={title} className="suggestion" onClick={() => onPick(title)}>
+        <span className={`tile-icon ${color}`}><Icon /></span><Outward className="suggestion-arrow" />
+        <span className="category">{category}</span><strong>{title}</strong>
+      </button>)}</div>
+  </section>;
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-function buildFolderTree(results: SearchResult[]): FolderNode[] {
-  const nodeMap = new Map<string, FolderNode>();
-  const root: FolderNode[] = [];
-
-  for (const r of results) {
-    if (!r.folderPath) continue;
-    const parts = r.folderPath.replace(/\\/g, '/').replace(/^\//, '').split('/').filter(Boolean);
-    let parentChildren = root;
-    let currentPath = '';
-
-    parts.forEach((part, idx) => {
-      currentPath = currentPath ? `${currentPath}/${part}` : part;
-      if (!nodeMap.has(currentPath)) {
-        const node: FolderNode = { name: part, path: currentPath, children: [], fileCount: 0 };
-        nodeMap.set(currentPath, node);
-        parentChildren.push(node);
-      }
-      const node = nodeMap.get(currentPath)!;
-      if (idx === parts.length - 1) node.fileCount++;
-      parentChildren = node.children;
-    });
-  }
-
-  return root;
-}
-
-const EXT_COLORS: Record<string, string> = {
-  pdf: '#dc2626', docx: '#2563eb', doc: '#2563eb',
-  xlsx: '#16a34a', xls: '#16a34a', csv: '#16a34a',
-  pptx: '#ea580c', ppt: '#ea580c',
-  txt: '#6b7280', md: '#6b7280',
-  dwg: '#7c3aed', dxf: '#7c3aed', ifc: '#0891b2',
-  zip: '#854d0e', rar: '#854d0e',
-  jpg: '#db2777', jpeg: '#db2777', png: '#db2777',
-};
-
-const PREVIEWABLE_EXTS = new Set(['pdf', 'txt', 'md']);
-
-function getExt(filename: string) {
-  return filename.split('.').pop()?.toLowerCase() ?? 'file';
-}
-
-function formatDate(s: string | null): string {
-  if (!s) return '—';
-  try {
-    return new Date(s).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-  } catch {
-    return s;
-  }
-}
-
-// ── ScoreBadge ────────────────────────────────────────────────────────────────
-
-function ScoreBadge({ score }: { score: number }) {
-  const pct = Math.round(score * 100);
-  const [color, bg] =
-    pct >= 75 ? ['#16a34a', '#dcfce7'] :
-    pct >= 50 ? ['#d97706', '#fef3c7'] :
-    ['#6b7280', '#f3f4f6'];
-  return (
-    <span className="score-badge" style={{ color, backgroundColor: bg }}>
-      {pct}%
-    </span>
-  );
-}
-
-// ── FolderTreeItem ────────────────────────────────────────────────────────────
-
-interface FolderTreeItemProps {
-  node: FolderNode;
-  depth: number;
-  selectedPath: string | null;
-  onSelect: (path: string | null) => void;
-}
-
-function FolderTreeItem({ node, depth, selectedPath, onSelect }: FolderTreeItemProps) {
-  const [expanded, setExpanded] = useState(depth === 0);
-  const isSelected = selectedPath === node.path;
-
-  return (
-    <div>
-      <div
-        className={`folder-item${isSelected ? ' selected' : ''}`}
-        style={{ paddingLeft: `${10 + depth * 14}px` }}
-        onClick={() => {
-          onSelect(isSelected ? null : node.path);
-          if (node.children.length > 0) setExpanded(e => !e);
-        }}
-      >
-        <span className="folder-toggle">
-          {node.children.length > 0 ? (expanded ? '▾' : '▸') : ''}
-        </span>
-        {isSelected
-          ? <FolderOpenIcon className="folder-icon open" sx={{ fontSize: 16 }} />
-          : <FolderIcon className="folder-icon" sx={{ fontSize: 16 }} />
-        }
-        <span className="folder-name">{node.name}</span>
-        {node.fileCount > 0 && (
-          <span className="folder-count">{node.fileCount}</span>
-        )}
-      </div>
-      {expanded && node.children.map(child => (
-        <FolderTreeItem
-          key={child.path}
-          node={child}
-          depth={depth + 1}
-          selectedPath={selectedPath}
-          onSelect={onSelect}
-        />
-      ))}
+function Recent({ files, onOpen, full = false }: { files: SearchResult[]; onOpen: (file: SearchResult) => void; full?: boolean }) {
+  const Heading = full ? 'h1' : 'h2';
+  return <section className={full ? 'recent-page' : 'section'} aria-labelledby="recent-title">
+    <div className="section-head"><div><Heading id="recent-title">{full ? 'Recent files' : 'Recently opened'}</Heading>
+      <p>Documents you’ve opened during this session.</p></div>
+      {!full && files.length > 0 && <a href="#recent" className="text-link">View all <Arrow /></a>}
     </div>
-  );
+    {files.length ? <DocumentList files={full ? files : files.slice(0, 3)} onOpen={onOpen} /> :
+      <div className="recent-empty"><span className="empty-icon"><History /></span><div><strong>No recently opened files</strong>
+        <p>Open a search result and you’ll find it here.</p></div>{full && <a className="secondary" href="#search">Go to search</a>}</div>}
+  </section>;
 }
 
-// ── PreviewPanel ──────────────────────────────────────────────────────────────
-
-interface PreviewPanelProps {
-  file: SearchResult;
-  onClose: () => void;
+function folderKey(path: string | null) {
+  return (path ?? '').replaceAll('\\', '/').split('/').filter(Boolean).join('/');
 }
 
-function PreviewPanel({ file, onClose }: PreviewPanelProps) {
-  const ext = getExt(file.filename);
-  const extColor = EXT_COLORS[ext] ?? '#6b7280';
-  const canPreview = PREVIEWABLE_EXTS.has(ext);
-
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [onClose]);
-
-  return (
-    <>
-      <div className="preview-backdrop" onClick={onClose} />
-      <aside className="preview-panel">
-        <div className="preview-header">
-          <div className="preview-title">
-            <span className="ext-badge" style={{ background: extColor }}>
-              {ext.toUpperCase()}
-            </span>
-            <span className="preview-filename" title={file.filename}>
-              {file.filename}
-            </span>
-          </div>
-          <div className="preview-header-actions">
-            <a
-              href={`/api/files/${file.id}?download=true`}
-              download={file.filename}
-              className="btn-teal sm"
-            >
-              <DownloadIcon sx={{ fontSize: 13 }} />
-              Download
-            </a>
-            <button className="preview-close" onClick={onClose} aria-label="Close preview">
-              <CloseIcon sx={{ fontSize: 17 }} />
-            </button>
-          </div>
-        </div>
-
-        <div className="preview-meta">
-          {file.folderPath && (
-            <span className="pmeta-item">
-              <FolderIcon sx={{ fontSize: 12 }} />
-              {file.folderPath}
-            </span>
-          )}
-          {file.author && <span className="pmeta-item pmeta-author">{file.author}</span>}
-          {file.createdAt && (
-            <span className="pmeta-item">{formatDate(file.createdAt)}</span>
-          )}
-          <ScoreBadge score={file.score} />
-        </div>
-
-        <div className="preview-body">
-          {canPreview ? (
-            <iframe
-              key={file.id}
-              src={`/api/files/${file.id}`}
-              title={file.filename}
-              className="preview-iframe"
-            />
-          ) : (
-            <div className="preview-unsupported">
-              <InsertDriveFileIcon sx={{ fontSize: 48, opacity: 0.18 }} />
-              <p className="preview-unsupported-msg">
-                Preview not available for <strong>.{ext}</strong> files
-              </p>
-              <p className="preview-unsupported-sub">
-                Download the file to open it in the appropriate application.
-              </p>
-              <a
-                href={`/api/files/${file.id}?download=true`}
-                download={file.filename}
-                className="btn-teal sm"
-              >
-                <DownloadIcon sx={{ fontSize: 13 }} />
-                Download to open
-              </a>
-            </div>
-          )}
-        </div>
-      </aside>
-    </>
-  );
+function Results({ search, onOpen }: { search: ReturnType<typeof useSearch>; onOpen: (file: SearchResult) => void }) {
+  const [folder, setFolder] = useState('');
+  const [name, setName] = useState('');
+  const folders = new Set<string>();
+  for (const file of search.results) {
+    const parts = folderKey(file.folderPath).split('/').filter(Boolean);
+    parts.forEach((_, i) => folders.add(parts.slice(0, i + 1).join('/')));
+  }
+  const visible = search.results.filter(file => {
+    const path = folderKey(file.folderPath);
+    return (!folder || path === folder || path.startsWith(folder + '/')) &&
+      file.filename.toLowerCase().includes(name.trim().toLowerCase());
+  });
+  return <section className="section results" aria-labelledby="results-title" aria-busy={search.status === 'loading'}>
+    <div className="section-head"><div><h2 id="results-title">Search results</h2>
+      <p className="result-summary" role="status">{search.status === 'ready'
+        ? `${visible.length} of ${search.results.length} matching files for “${search.query.trim()}”`
+        : search.status === 'loading' ? 'Searching your document index…' : 'The search service is unavailable.'}</p></div></div>
+    {search.status === 'loading' && <div className="skeletons" aria-hidden="true"><i /><i /><i /></div>}
+    {search.status === 'error' && <div className="state-panel service-error"><Warning /><h3>Couldn’t complete this search</h3>
+      <p>Check your connection and try the same query again.</p>
+      <button className="secondary" onClick={() => search.search(search.query, true)}>Retry search</button></div>}
+    {search.status === 'ready' && <>
+      {search.results.length > 0 && <div className="filters">
+        <label className="filter-field"><Search /><input aria-label="Filter by filename" placeholder="Filter by filename" value={name} onChange={e => setName(e.target.value)} /></label>
+        {folders.size > 0 && <label className="filter-field"><Folder /><select aria-label="Filter by folder" value={folder} onChange={e => setFolder(e.target.value)}>
+          <option value="">All folders</option>{Array.from(folders).sort().map(path => <option key={path} value={path}>{path}</option>)}</select></label>}
+      </div>}
+      {visible.length ? <DocumentList files={visible} onOpen={onOpen} showScore /> :
+        <div className="state-panel"><Search /><h3>{search.results.length ? 'No files match these filters' : 'No matching documents'}</h3>
+          <p>{search.results.length ? 'Clear the filters to see your search results.' : 'Try a broader topic, a filename, or words from the document.'}</p>
+          {search.results.length > 0 && <button className="secondary" onClick={() => { setFolder(''); setName(''); }}>Clear filters</button>}
+        </div>}
+    </>}
+  </section>;
 }
 
-// ── App ───────────────────────────────────────────────────────────────────────
+function Guide({ onClose }: { onClose: () => void }) {
+  return <Modal title="Search guide" onClose={onClose}><div className="guide-content">
+    <h3>Describe the document</h3><p>Search for a topic, a phrase, or a filename. For example, “how employees are paid” can surface a compensation policy even when the title uses different words.</p>
+    <h3>Narrow the matches</h3><p>Search returns up to ten files. Filter those results by filename or folder. The match score reflects the search ranking.</p>
+    <h3>Open the original</h3><p>Select a result for its details. Preview supported files in the browser or download the original. Recent files keeps track of what you open until you reload or close this tab.</p>
+    <div className="guide-note"><Shield /><p>Your workspace processes document text locally. The search index stores embeddings and file metadata.</p></div>
+  </div></Modal>;
+}
+
+function currentPage() { return window.location.hash === '#recent' ? 'recent' : 'search'; }
 
 export default function App() {
-  const { query, setQuery, results, loading, error, searched } = useSearch();
-  const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
-  const [folderSearch, setFolderSearch] = useState('');
-  const [previewFile, setPreviewFile] = useState<SearchResult | null>(null);
-
-  const folderTree = useMemo(() => buildFolderTree(results), [results]);
-
-  const displayedResults = useMemo(() => {
-    let list = results;
-    if (selectedFolder) {
-      list = list.filter(r =>
-        r.folderPath?.replace(/\\/g, '/').includes(selectedFolder) ?? false
-      );
+  const search = useSearch();
+  const input = useRef<HTMLInputElement>(null);
+  const [page, setPage] = useState(currentPage);
+  const [guide, setGuide] = useState(false);
+  const [preview, setPreview] = useState<SearchResult | null>(null);
+  const [recent, setRecent] = useState<SearchResult[]>([]);
+  useEffect(() => {
+    function navigate() { setPage(currentPage()); window.scrollTo(0, 0); }
+    window.addEventListener('hashchange', navigate);
+    return () => window.removeEventListener('hashchange', navigate);
+  }, []);
+  useEffect(() => {
+    document.title = `${page === 'search' ? 'Document search' : 'Recent files'} · Contexta`;
+    function shortcut(e: KeyboardEvent) {
+      if (guide || preview || e.ctrlKey || e.altKey || e.metaKey || e.key !== '/' ||
+        (e.target instanceof HTMLElement && (e.target.isContentEditable || e.target.closest('input,select,textarea')))) return;
+      e.preventDefault();
+      if (page !== 'search') { window.location.hash = 'search'; setPage('search'); }
+      requestAnimationFrame(() => input.current?.focus());
     }
-    if (folderSearch.trim()) {
-      const q = folderSearch.toLowerCase();
-      list = list.filter(r => r.filename.toLowerCase().includes(q));
-    }
-    return list;
-  }, [results, selectedFolder, folderSearch]);
-
-  const breadcrumb = selectedFolder
-    ? selectedFolder.split('/').join(' / ')
-    : searched ? 'Search Results' : 'All Documents';
-
-  return (
-    <div className="app-root">
-
-      {/* ── Top Navigation ─────────────────────────────────────────── */}
-      <nav className="top-nav">
-        <span className="brand">contextaBox</span>
-
-        <div className="nav-tabs">
-          <button className="nav-tab">
-            File review <span className="tab-badge">0</span>
-          </button>
-          <button className="nav-tab">
-            Recycle Bin <span className="tab-badge">82</span>
-          </button>
-        </div>
-
-        <div className="global-search-field">
-          <span className="gsearch-icon">
-            {loading
-              ? <CircularProgress size={13} sx={{ color: 'rgba(255,255,255,0.55)' }} />
-              : <SearchIcon sx={{ fontSize: 15, color: 'rgba(255,255,255,0.55)' }} />
-            }
-          </span>
-          <input
-            type="text"
-            className="gsearch-input"
-            placeholder="Global search"
-            value={query}
-            onChange={e => { setQuery(e.target.value); setSelectedFolder(null); }}
-          />
-          {query && results.length > 0 && (
-            <span className="gsearch-count">{results.length}</span>
-          )}
-          {query && (
-            <button
-              className="gsearch-clear"
-              onClick={() => { setQuery(''); setSelectedFolder(null); setFolderSearch(''); }}
-            >
-              ×
-            </button>
-          )}
-        </div>
-      </nav>
-
-      <div className="workspace">
-
-        {/* ── Left Sidebar ───────────────────────────────────────────── */}
-        <aside className="sidebar">
-          <div className="sidebar-top">
-            <button className="btn-outline sm">
-              Menu <ArrowDropDownIcon sx={{ fontSize: 15 }} />
-            </button>
-            <button className="btn-teal sm">
-              0000000 <ArrowDropDownIcon sx={{ fontSize: 15 }} />
-            </button>
+    window.addEventListener('keydown', shortcut);
+    return () => window.removeEventListener('keydown', shortcut);
+  }, [page, guide, preview]);
+  function open(file: SearchResult) {
+    setPreview(file);
+    setRecent(previous => [file, ...previous.filter(item => item.id !== file.id)]);
+  }
+  const label = page === 'recent' ? 'Recent files' : 'Search';
+  return <div className="app">
+    <a className="skip" href="#main-content" onClick={event => {
+      event.preventDefault();
+      document.getElementById('main-content')?.focus();
+    }}>Skip to content</a>
+    <header className="topbar"><div className="header-inner">
+      <a href="#search" className="brand" aria-label="Contexta search"><img src="/favicon.svg" alt="" />Contexta</a>
+      <nav className="nav" aria-label="Workspace"><a href="#search" aria-current={page === 'search' ? 'page' : undefined}><Search />Search</a>
+        <a href="#recent" aria-current={page === 'recent' ? 'page' : undefined}><History />Recent files</a></nav>
+      <div className="header-tools"><span className="local"><Shield />Local workspace</span>
+        <button className="icon-button" aria-label="Open search guide" title="Search guide" onClick={() => setGuide(true)}><Help /></button></div>
+    </div></header>
+    <main id="main-content" tabIndex={-1} className="container">
+      <div className="breadcrumb"><Grid />Workspace <Chevron /><strong>{label}</strong></div>
+      {page === 'recent' ? <Recent files={recent} onOpen={open} full /> : <>
+        <section className="hero" aria-labelledby="hero-title">
+          <div className="art"><Terrain /></div>
+          <div className="hero-content">
+            <div className="eyebrow"><Layers /> Semantic workspace</div>
+            <h1 id="hero-title">Document search<span>.</span></h1>
+            <p>Find files by what they mean, even when you don’t know the filename.</p>
+            <form role="search" className="search-box" onSubmit={e => { e.preventDefault(); if (search.query.trim()) search.search(search.query, true); else input.current?.focus(); }}>
+              <Search /><input ref={input} aria-label="Search documents" placeholder="Search by topic or keyword…" value={search.query} onChange={e => search.search(e.target.value)} />
+              {search.query ? <button type="button" className="clear" aria-label="Clear search" onClick={() => { search.search(''); input.current?.focus(); }}><Close /></button> : <kbd>/</kbd>}
+              <button className="search-submit" type="submit" aria-label="Search documents"><span>Search</span><Arrow /></button>
+            </form>
           </div>
-
-          <div className="sidebar-tree">
-            {!searched && (
-              <div className="tree-placeholder">
-                <FolderIcon sx={{ fontSize: 30, opacity: 0.22 }} />
-                <p>Use the global search to explore document folders</p>
-              </div>
-            )}
-
-            {searched && folderTree.length > 0 && (
-              <>
-                <p className="tree-section-label">Folders on project</p>
-
-                <div
-                  className={`tree-all-files${selectedFolder === null ? ' active' : ''}`}
-                  onClick={() => setSelectedFolder(null)}
-                >
-                  <InsertDriveFileIcon sx={{ fontSize: 14, color: '#8a95a3' }} />
-                  <span className="folder-name">All Files</span>
-                  <span className="folder-count">{results.length}</span>
-                </div>
-
-                {folderTree.map(node => (
-                  <FolderTreeItem
-                    key={node.path}
-                    node={node}
-                    depth={0}
-                    selectedPath={selectedFolder}
-                    onSelect={setSelectedFolder}
-                  />
-                ))}
-              </>
-            )}
-
-            {searched && folderTree.length === 0 && results.length > 0 && (
-              <div className="tree-placeholder">
-                <FolderIcon sx={{ fontSize: 26, opacity: 0.22 }} />
-                <p>No folder structure in results</p>
-              </div>
-            )}
-          </div>
-        </aside>
-
-        {/* ── Main Pane ──────────────────────────────────────────────── */}
-        <main className="main-pane">
-
-          {/* Content toolbar */}
-          <div className="content-toolbar">
-            <button className="btn-outline sm">
-              Menu <ArrowDropDownIcon sx={{ fontSize: 15 }} />
-            </button>
-            <button className="btn-teal sm upload-btn">
-              <CloudUploadIcon sx={{ fontSize: 14 }} />
-              Upload files
-            </button>
-            <div className="breadcrumb">
-              <span className="bc-label">YOU ARE HERE:</span>
-              <span className="bc-path">/ {breadcrumb}</span>
-            </div>
-            <div className="toolbar-fill" />
-            <button className="btn-teal sm">
-              Combined <ArrowDropDownIcon sx={{ fontSize: 15 }} />
-            </button>
-          </div>
-
-          {/* Stats bar */}
-          <div className="stats-bar">
-            <span className="stats-text">
-              {searched
-                ? <>Showing {displayedResults.length} of {results.length} files &nbsp;
-                    <span className="sel-badge">0 file(s) selected</span>
-                  </>
-                : <>Showing 0 to 0 of 0 files &nbsp;
-                    <span className="sel-badge">0 file(s) selected</span>
-                  </>
-              }
-            </span>
-            <div className="stats-right">
-              <label className="show-label">
-                Show
-                <select className="show-select" defaultValue="10">
-                  <option value="10">10</option>
-                  <option value="25">25</option>
-                  <option value="50">50</option>
-                  <option value="100">100</option>
-                </select>
-                files
-              </label>
-              <div className="folder-search">
-                <SearchIcon sx={{ fontSize: 13, color: '#9aa3b0' }} />
-                <input
-                  type="text"
-                  placeholder="Search in folder"
-                  value={folderSearch}
-                  onChange={e => setFolderSearch(e.target.value)}
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* File table */}
-          <div className="table-wrap">
-            <table className="file-table">
-              <thead>
-                <tr>
-                  <th className="col-name">Name <UnfoldMoreIcon className="sort-ic" /></th>
-                  <th className="col-desc">Description <UnfoldMoreIcon className="sort-ic" /></th>
-                  <th className="col-rev">Revision <UnfoldMoreIcon className="sort-ic" /></th>
-                  <th className="col-ver">Version <UnfoldMoreIcon className="sort-ic" /></th>
-                  <th className="col-size">Size <UnfoldMoreIcon className="sort-ic" /></th>
-                  <th className="col-date">Updated <UnfoldMoreIcon className="sort-ic" /></th>
-                  <th className="col-by">Updated by <UnfoldMoreIcon className="sort-ic" /></th>
-                </tr>
-              </thead>
-              <tbody>
-                {error && (
-                  <tr>
-                    <td colSpan={7} className="td-empty td-error">⚠ {error}</td>
-                  </tr>
-                )}
-
-                {!error && !searched && !loading && (
-                  <tr>
-                    <td colSpan={7} className="td-empty">No files in folder...</td>
-                  </tr>
-                )}
-
-                {!error && searched && displayedResults.length === 0 && !loading && (
-                  <tr>
-                    <td colSpan={7} className="td-empty">No files found for this query.</td>
-                  </tr>
-                )}
-
-                {displayedResults.map((r, i) => {
-                  const ext = getExt(r.filename);
-                  const extColor = EXT_COLORS[ext] ?? '#6b7280';
-                  const isActive = previewFile?.id === r.id;
-                  return (
-                    <tr
-                      key={r.id}
-                      className={[
-                        i % 2 !== 0 ? 'tr-alt' : '',
-                        isActive ? 'tr-active' : '',
-                      ].join(' ').trim()}
-                    >
-                      <td className="col-name">
-                        <div className="fname-cell">
-                          <span className="ext-badge" style={{ background: extColor }}>
-                            {ext.toUpperCase()}
-                          </span>
-                          <button
-                            className="fname-text"
-                            onClick={() => setPreviewFile(isActive ? null : r)}
-                            title={r.nasPath || r.filename}
-                          >
-                            {r.filename}
-                          </button>
-                          <ScoreBadge score={r.score} />
-                        </div>
-                      </td>
-                      <td className="col-desc td-muted">{r.folderPath ?? '—'}</td>
-                      <td className="td-muted">—</td>
-                      <td className="td-muted">—</td>
-                      <td className="td-muted">—</td>
-                      <td className="td-muted">{formatDate(r.createdAt)}</td>
-                      <td className="td-muted">{r.author ?? '—'}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </main>
-      </div>
-
-      {/* ── File Preview Panel ─────────────────────────────────────── */}
-      {previewFile && (
-        <PreviewPanel
-          file={previewFile}
-          onClose={() => setPreviewFile(null)}
-        />
-      )}
-    </div>
-  );
+        </section>
+        {search.status === 'idle' ? <><Suggestions onPick={term => search.search(term, true)} /><Recent files={recent} onOpen={open} /></> :
+          <Results key={search.query.trim()} search={search} onOpen={open} />}
+      </>}
+    </main>
+    <footer className="footer"><span><Layers />Contexta</span><button className="text-link" onClick={() => setGuide(true)}>Search guide <Outward /></button></footer>
+    {preview && <FilePreview file={preview} onClose={() => setPreview(null)} />}
+    {guide && <Guide onClose={() => setGuide(false)} />}
+  </div>;
 }
